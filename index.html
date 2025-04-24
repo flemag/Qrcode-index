@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Smart QR Scanner</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, sans-serif;
+      background: #000;
+      color: #fff;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .permission-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.95);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      padding: 20px;
+      text-align: center;
+      transition: opacity 0.3s;
+    }
+
+    .permission-button {
+      margin-top: 25px;
+      padding: 15px 30px;
+      font-size: 1.1em;
+      background: #007bff;
+      border-radius: 30px;
+      color: white;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+
+    #scanner-container {
+      position: relative;
+      height: 100%;
+      opacity: 1;
+      transition: opacity 0.4s ease-in-out;
+    }
+
+    #video-stream {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .scan-overlay {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 70%;
+      height: 70%;
+      border: 3px solid rgba(0, 123, 255, 0.8);
+      border-radius: 15px;
+      box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.7);
+      pointer-events: none;
+      animation: scan-pulse 1.5s infinite;
+    }
+
+    .controls {
+      position: fixed;
+      bottom: 25px;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      z-index: 100;
+    }
+
+    .control-button {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 30px;
+      font-size: 16px;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+
+    #document-view {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: #fff;
+      color: #333;
+      padding: 20px;
+      overflow-y: auto;
+      transform: translateY(100%);
+      transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s;
+      opacity: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #document-view.visible {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .document-container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      flex: 1;
+    }
+
+    .document-title {
+      color: #007bff;
+      font-size: 1.8em;
+      margin-bottom: 1.5rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 2px solid #007bff;
+      animation: fadeInUp 0.6s ease-out;
+    }
+
+    #document-content {
+      line-height: 1.6;
+    }
+
+    #document-content h2 {
+      color: #0056b3;
+      margin: 1.2em 0 0.8em;
+      font-size: 1.4em;
+    }
+
+    #document-content p {
+      margin: 0.8em 0;
+    }
+
+    #document-content ul,
+    #document-content ol {
+      margin: 0.8em 0 0.8em 2em;
+    }
+
+    #document-content li {
+      margin-bottom: 0.6em;
+    }
+    
+     .back-button {
+      position: relative;
+      margin: 30px auto 20px;
+      padding: 12px 30px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 25px;
+      cursor: pointer;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+      transition: transform 0.2s;
+      width: max-content;
+    }
+
+    .important {
+      color: #d9534f !important;
+      font-weight: bold;
+    }
+
+
+    @keyframes scan-pulse {
+      0% { border-color: rgba(0, 123, 255, 0.8); }
+      50% { border-color: rgba(0, 255, 136, 0.8); }
+      100% { border-color: rgba(0, 123, 255, 0.8); }
+    }
+
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="permission-overlay" id="permission-overlay">
+    <p>🔒 Autorisation caméra requise</p>
+    <button class="permission-button" id="enable-camera">Activer la caméra</button>
+  </div>
+
+  <div id="scanner-container">
+    <video id="video-stream" playsinline muted></video>
+    <div class="scan-overlay"></div>
+    
+    <div class="controls">
+      <button class="control-button" id="toggle-camera">🔄 Caméra</button>
+      <label class="control-button" for="file-input">📁 Importer</label>
+    </div>
+  </div>
+
+  <div id="document-view">
+    <div class="document-container">
+      <h1 class="document-title" id="document-title"></h1>
+      <div id="document-content"></div>
+    </div>
+    <button class="back-button" onclick="resetScanner()">Retour au scanner</button>
+  </div>
+
+  <input type="file" id="file-input" accept="image/*" hidden>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  <script>
+    const videoElement = document.getElementById('video-stream');
+    const permissionOverlay = document.getElementById('permission-overlay');
+    const scannerContainer = document.getElementById('scanner-container');
+    const documentView = document.getElementById('document-view');
+    const documentTitle = document.getElementById('document-title');
+    const documentContent = document.getElementById('document-content');
+    
+    let mediaStream = null;
+    let isFrontCamera = false;
+    let isScanning = false;
+    let lastScanResult = '';
+
+    // Gestion des permissions
+    async function checkPermissions() {
+      try {
+        return await navigator.permissions.query({ name: 'camera' })
+          .then(status => status.state === 'granted');
+      } catch {
+        return false;
+      }
+    }
+
+    // Initialisation de la caméra
+    async function initializeCamera() {
+      try {
+        if (mediaStream) {
+          mediaStream.getTracks().forEach(track => track.stop());
+        }
+
+        const constraints = {
+          video: {
+            facingMode: isFrontCamera ? 'user' : 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 }
+          }
+        };
+
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        videoElement.srcObject = mediaStream;
+
+        await new Promise((resolve) => {
+          videoElement.onloadedmetadata = () => {
+            videoElement.play().then(resolve).catch(resolve);
+          };
+        });
+
+        permissionOverlay.style.display = 'none';
+        scannerContainer.style.opacity = '1';
+        startQRDetection();
+      } catch (error) {
+        handleCameraError(error);
+      }
+    }
+
+    // Détection QR en temps réel
+    function startQRDetection() {
+      if (isScanning) return;
+      isScanning = true;
+      
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+
+      const processFrame = () => {
+        if (!isScanning) return;
+
+        try {
+          canvas.width = videoElement.videoWidth;
+          canvas.height = videoElement.videoHeight;
+          context.drawImage(videoElement, 0, 0);
+
+          const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+          const qrCode = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: 'dontInvert',
+            maxScansPerSecond: 60
+          });
+
+          if (qrCode && qrCode.data !== lastScanResult) {
+            handleQRDetection(qrCode.data);
+          }
+          requestAnimationFrame(processFrame);
+        } catch (error) {
+          console.error('Erreur de scan:', error);
+          requestAnimationFrame(processFrame);
+        }
+      };
+
+      processFrame();
+    }
+
+    // Affichage du document
+    function handleQRDetection(data) {
+      isScanning = false;
+      lastScanResult = data;
+      mediaStream.getTracks().forEach(track => track.stop());
+      displayDocumentContent(data);
+      triggerHapticFeedback();
+    }
+
+    function displayDocumentContent(htmlContent) {
+      scannerContainer.style.opacity = '0';
+      
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(htmlContent, 'text/html');
+      
+      // Extraction et sécurisation du contenu
+      const title = doc.querySelector('title')?.textContent || 'Document sans titre';
+      const bodyContent = doc.body.innerHTML.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+
+      documentTitle.textContent = title;
+      documentContent.innerHTML = bodyContent;
+      applyDocumentStyles();
+
+      setTimeout(() => {
+        documentView.classList.add('visible');
+        window.scrollTo(0, 0);
+      }, 50);
+    }
+
+    // Réinitialisation du scanner
+    function resetScanner() {
+      documentView.classList.remove('visible');
+      scannerContainer.style.opacity = '1';
+      
+      setTimeout(() => {
+        documentView.style.display = 'none';
+        lastScanResult = '';
+        initializeCamera();
+      }, 400);
+    }
+
+    // Styles dynamiques
+    function applyDocumentStyles() {
+      documentContent.querySelectorAll('.important').forEach(el => {
+        el.style.color = '#d9534f';
+        el.style.fontWeight = 'bold';
+      });
+    }
+
+    // Feedback haptique
+    function triggerHapticFeedback() {
+      if (navigator.vibrate) {
+        navigator.vibrate([50, 50, 50]);
+      }
+    }
+
+    // Gestion des erreurs
+    function handleCameraError(error) {
+      console.error('Erreur caméra:', error);
+      permissionOverlay.style.display = 'flex';
+      scannerContainer.style.opacity = '0';
+      
+      if (error.name === 'NotAllowedError') {
+        permissionOverlay.querySelector('p').textContent = 'Permission refusée - Veuillez autoriser la caméra dans les paramètres';
+      }
+    }
+
+    // Événements
+    document.getElementById('enable-camera').addEventListener('click', initializeCamera);
+    
+    document.getElementById('toggle-camera').addEventListener('click', () => {
+      isFrontCamera = !isFrontCamera;
+      initializeCamera();
+    });
+
+    document.getElementById('file-input').addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          const imageData = ctx.getImageData(0, 0, img.width, img.height);
+          const qrCode = jsQR(imageData.data, imageData.width, imageData.height);
+          if (qrCode) handleQRDetection(qrCode.data);
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Initialisation
+    async function init() {
+      if (await checkPermissions()) {
+        initializeCamera();
+      } else {
+        permissionOverlay.style.display = 'flex';
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
